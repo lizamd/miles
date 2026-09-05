@@ -140,6 +140,19 @@ def execute(args: ScriptArgs):
     # degradation introduced by this variant.
     attention_backend = "auto" if args.hardware == "MI455X" else "flash"
 
+    # gfx1250 rollout backend. sglang's own mi45x CI pairs a triton prefill with an aiter
+    # decode (SGLANG_USE_AITER_UNIFIED_ATTN=1), and that is the faster combination, but the
+    # aiter kernel reads out of bounds on this part: two runs died in
+    #   kernel_unified_attention_3d_num_query_heads_16_num_queries_per_kv_4_BLOCK_SIZE_64_
+    #   TILE_SIZE_64_HEAD_SIZE_128_NUM_SEGMENTS_PER_SEQ_4_..._ALL_DECODE_1_...
+    # with "Memory access fault ... Page not present", at 65 concurrent requests and 6 % KV
+    # cache use, which takes both sglang schedulers down with exit -6 and fails the job.
+    # Neither concurrency nor memory pressure is the trigger. triton for both phases is
+    # slower and is what actually completes a run; revisit once the kernel is fixed upstream.
+    rollout_attention_args = (
+        "--sglang-attention-backend triton " if args.hardware == "MI455X" else ""
+    )
+
     misc_args = (
         # default dropout in megatron is 0.1
         "--attention-dropout 0.0 "
@@ -164,6 +177,8 @@ def execute(args: ScriptArgs):
         f"{perf_args} "
         f"{eval_args} "
         f"{sglang_args} "
+
+        f"{rollout_attention_args} "
         f"{misc_args} "
         f"{args.extra_args} "
     )
