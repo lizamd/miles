@@ -369,6 +369,34 @@ ENV HSA_ENABLE_IPC_MODE_LEGACY=${HSA_ENABLE_IPC_MODE_LEGACY}
 # Where the gfx1250 RCCL was unpacked. The SDK copy is already overridden above, so this only
 # exists for launchers that want to point at it explicitly (Primus reads RCCL_LIB_DIR).
 ENV RCCL_LIB_DIR=/opt/rccl-gfx1250
+
+# ---------------------- gfx1250 collective-communication settings ------------------------------
+# Taken from AMD's Primus runner/helpers/envs/{MI455X,base_env}.sh, which is the only place
+# these are written down for this part. Without them a miles run reaches the first weight
+# broadcast and stops: BROADCAST hangs for the full 1800 s watchdog timeout, the sglang
+# schedulers abort, and the job dies -- reproduced on 4x gfx1250 before setting these, and gone
+# after, with the same broadcast completing in 4.3 s.
+#
+# The one that matters most is almost certainly MSCCL/MSCCL++, RCCL's alternative collective
+# implementation: Primus disables it on this part and the deadlock disappeared with it off.
+# The rest are Primus's defaults for gfx1250 and are set here so a run does not depend on a
+# launcher remembering them.
+#
+# NCCL_IB_DISABLE is deliberately *not* set: it is a single-node choice (Primus sets it in
+# MI455X.sh, whose comment notes that naming devices the host lacks stalls RCCL init), and
+# baking it into the image would break a multi-node job. Pass it at run time on one node.
+ARG GFX1250_COLLECTIVE_ENV=0
+ENV RCCL_MSCCL_ENABLE=${GFX1250_COLLECTIVE_ENV:+0}
+ENV RCCL_MSCCLPP_ENABLE=${GFX1250_COLLECTIVE_ENV:+0}
+ENV RCCL_MSCCLPP_FORCE_ENABLE=${GFX1250_COLLECTIVE_ENV:+0}
+ENV TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK=${GFX1250_COLLECTIVE_ENV:+0}
+ENV TORCH_NCCL_HIGH_PRIORITY=${GFX1250_COLLECTIVE_ENV:+1}
+ENV NCCL_CHECKS_DISABLE=${GFX1250_COLLECTIVE_ENV:+1}
+ENV NCCL_CROSS_NIC=${GFX1250_COLLECTIVE_ENV:+0}
+ENV NCCL_PXN_DISABLE=${GFX1250_COLLECTIVE_ENV:+1}
+ENV HSA_ENABLE_SDMA=${GFX1250_COLLECTIVE_ENV:+1}
+ENV GPU_MAX_HW_QUEUES=${GFX1250_COLLECTIVE_ENV:+2}
+ENV AMD_SERIALIZE_COPY=${GFX1250_COLLECTIVE_ENV:+0}
 ENV HSA_NO_SCRATCH_RECLAIM=1
 ENV SGLANG_USE_AITER=1
 ENV SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1
@@ -376,7 +404,10 @@ ENV SGLANG_MOE_PADDING=1
 ENV SGLANG_SET_CPU_AFFINITY=1
 ENV SGLANG_ROCM_FUSED_DECODE_MLA=1
 ENV SGLANG_USE_ROCM700A=${SGLANG_USE_ROCM700A}
-ENV NCCL_MIN_NCHANNELS=112
+# The base image sets this to 112 for gfx950. Primus sets nothing for gfx1250, and 112
+# channels is a lot for the small groups a 4-GPU node forms, so the variant clears it.
+ARG NCCL_MIN_NCHANNELS=112
+ENV NCCL_MIN_NCHANNELS=${NCCL_MIN_NCHANNELS}
 ENV TORCHINDUCTOR_MAX_AUTOTUNE=1
 ENV TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE=1
 # Keep GPUs visible to Ray num_gpus=0 coordinators so Megatron device checks do not crash.

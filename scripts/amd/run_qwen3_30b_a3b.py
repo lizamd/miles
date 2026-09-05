@@ -140,6 +140,15 @@ def execute(args: ScriptArgs):
     # degradation introduced by this variant.
     attention_backend = "auto" if args.hardware == "MI455X" else "flash"
 
+    # MI455X splits its four GPUs between training and generation (see the profile below);
+    # every other hardware keeps the colocated layout where both share all of them.
+    if args.hardware == "MI455X":
+        actor_gpus_per_node = args.num_gpus_per_node // 2
+        colocate_arg = ""
+    else:
+        actor_gpus_per_node = args.num_gpus_per_node
+        colocate_arg = "--colocate "
+
     # gfx1250 rollout backend. sglang's own mi45x CI pairs a triton prefill with an aiter
     # decode (SGLANG_USE_AITER_UNIFIED_ATTN=1), and that is the faster combination, but the
     # aiter kernel reads out of bounds on this part: two runs died in
@@ -163,9 +172,9 @@ def execute(args: ScriptArgs):
         # need to comment this when using model with MLA
         f"--attention-backend {attention_backend} "
         f"--actor-num-nodes {args.num_nodes} "
-        f"--actor-num-gpus-per-node {args.num_gpus_per_node} "
+        f"--actor-num-gpus-per-node {actor_gpus_per_node} "
         f"--num-gpus-per-node {args.num_gpus_per_node} "
-        "--colocate "
+        f"{colocate_arg}"
         "--use-fault-tolerance "
         f"--dump-details {args.output_dir}/{args.run_id}/dump_details "
     )
@@ -205,18 +214,26 @@ def execute(args: ScriptArgs):
         # TP stays 1, so no --sequence-parallel (it needs TP > 1). DP is 2.
         # Enablement only: nothing here has been tuned for 432 GB cards.
         case ("MI455X", 1):
+            # Async rather than colocate on a 4-GPU node: two GPUs train, two generate.
+            # Colocate makes --offload-train default to true, which parks the whole model in
+            # host RAM whenever the rollout engines want the GPUs. Measured on this node, that
+            # took each of four ranks from 24.9 GB to 44.0 GB of RSS -- 176 GB against 251 GB
+            # of system memory -- and Ray's OOM killer took the actors out. HBM was never the
+            # constraint: 432 GB per card, 170 GB still free at the time. Splitting the GPUs
+            # removes the offload entirely.
             perf_args += (
                 "--tensor-model-parallel-size 1 "
-                "--pipeline-model-parallel-size 2 "
+                "--pipeline-model-parallel-size 1 "
                 "--context-parallel-size 1 "
                 "--expert-model-parallel-size 2 "
                 "--expert-tensor-parallel-size 1 "
                 "--max-tokens-per-gpu 16384 "
             )
             sglang_args = (
+                "--rollout-num-gpus 2 "
                 "--rollout-num-gpus-per-engine 2 "
-                "--sglang-mem-fraction-static 0.7 "
-                "--sglang-max-running-requests 512 "
+                "--sglang-mem-fraction-static 0.85 "
+                "--sglang-max-running-requests 128 "
             )
             # No --optimizer-cpu-offload here, unlike MI355X. That trade only makes sense when
             # HBM is the scarce side: a 288 GB MI355X node has 8 cards against the same host

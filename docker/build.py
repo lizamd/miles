@@ -116,6 +116,9 @@ VARIANTS = {
             "HSA_ENABLE_IPC_MODE_LEGACY": "0",
             # torch 2.11+rocm10 and sglang 0.5.18 here are built against numpy 2.x.
             "NUMPY_SPEC": "",
+            # Primus's gfx1250 collective settings; see the Dockerfile for what breaks without.
+            "GFX1250_COLLECTIVE_ENV": "1",
+            "NCCL_MIN_NCHANNELS": "",
         },
     },
 }
