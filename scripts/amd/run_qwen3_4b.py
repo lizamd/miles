@@ -13,7 +13,7 @@ the training job.
 =====================
 
 Args:
-  --hardware: MI350X or MI355X, which fixes the default GPU count per node.
+  --hardware: MI350X, MI355X or MI455X, which fixes the default GPU count per node.
   --num-gpus-per-node: Override the GPU count, e.g. when only some devices are visible.
   --enable-eval: Run AIME evaluation every 20 steps (default: on).
   --model-dir / --data-dir: Checkpoint / dataset directories.
@@ -38,7 +38,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     model_name: str = "Qwen3-4B"
     megatron_model_type: str = "qwen3-4B"
     num_gpus_per_node: int | None = None
-    hardware: Literal["auto", "MI350X", "MI355X"] = "auto"
+    hardware: Literal["auto", "MI350X", "MI355X", "MI455X"] = "auto"
     enable_eval: bool = True
     num_rollout: int = 3000
     extra_args: str = ""
@@ -130,6 +130,16 @@ def execute(args: ScriptArgs):
 
     sglang_args = "--rollout-num-gpus-per-engine 2 " "--sglang-mem-fraction-static 0.7 "
 
+    # gfx1250 has no flash-attn build, and Megatron's --attention-backend flash sets
+    # NVTE_FLASH_ATTN=1 / NVTE_FUSED_ATTN=0 / NVTE_UNFUSED_ATTN=0, pinning Transformer Engine
+    # to a backend that is not installed; training then dies with "No dot product attention
+    # backend is available for the provided inputs". auto enables all three and lets TE pick
+    # what exists, which on gfx1250 is UnfusedDotProductAttention -- it handles the packed/THD
+    # layout fine. TE's fused attention is unavailable on this part both here and in AMD's own
+    # Primus gfx1250 image, so auto resolving to unfused is the expected outcome, not a
+    # degradation introduced by this variant.
+    attention_backend = "auto" if args.hardware == "MI455X" else "flash"
+
     misc_args = (
         # default dropout in megatron is 0.1
         "--attention-dropout 0.0 "
@@ -138,7 +148,7 @@ def execute(args: ScriptArgs):
         "--accumulate-allreduce-grads-in-fp32 "
         "--attention-softmax-in-fp32 "
         # need to comment this when using model with MLA
-        "--attention-backend flash "
+        f"--attention-backend {attention_backend} "
         "--colocate "
         f"--actor-num-nodes {args.num_nodes} "
         f"--actor-num-gpus-per-node {args.num_gpus_per_node} "

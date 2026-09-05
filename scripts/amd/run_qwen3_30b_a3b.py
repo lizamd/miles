@@ -13,7 +13,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     model_name: str = "Qwen3-30B-A3B"
     megatron_model_type: str = "qwen3-30B-A3B"
     num_gpus_per_node: int | None = None
-    hardware: Literal["auto", "MI350X", "MI355X"] = "auto"
+    hardware: Literal["auto", "MI350X", "MI355X", "MI455X"] = "auto"
     enable_eval: bool = True
     extra_args: str = ""
     data_dir: str = "/root/datasets"
@@ -130,6 +130,16 @@ def execute(args: ScriptArgs):
         "--adam-beta2 0.98 "
     )
 
+    # gfx1250 has no flash-attn build, and Megatron's --attention-backend flash sets
+    # NVTE_FLASH_ATTN=1 / NVTE_FUSED_ATTN=0 / NVTE_UNFUSED_ATTN=0, pinning Transformer Engine
+    # to a backend that is not installed; training then dies with "No dot product attention
+    # backend is available for the provided inputs". auto enables all three and lets TE pick
+    # what exists, which on gfx1250 is UnfusedDotProductAttention -- it handles the packed/THD
+    # layout fine. TE's fused attention is unavailable on this part both here and in AMD's own
+    # Primus gfx1250 image, so auto resolving to unfused is the expected outcome, not a
+    # degradation introduced by this variant.
+    attention_backend = "auto" if args.hardware == "MI455X" else "flash"
+
     misc_args = (
         # default dropout in megatron is 0.1
         "--attention-dropout 0.0 "
@@ -138,7 +148,7 @@ def execute(args: ScriptArgs):
         "--accumulate-allreduce-grads-in-fp32 "
         "--attention-softmax-in-fp32 "
         # need to comment this when using model with MLA
-        "--attention-backend flash "
+        f"--attention-backend {attention_backend} "
         f"--actor-num-nodes {args.num_nodes} "
         f"--actor-num-gpus-per-node {args.num_gpus_per_node} "
         f"--num-gpus-per-node {args.num_gpus_per_node} "
@@ -168,6 +178,39 @@ def execute(args: ScriptArgs):
         misc_args += "--megatron-to-hf-mode bridge "
 
     match (args.hardware, args.num_nodes):
+        # A 4-GPU MI455X node cannot use the MI355X shape. Megatron requires
+        # expert_tensor_parallel x expert_model_parallel x pipeline_model_parallel to divide
+        # world size, and the MI355X profile's 1 x 4 x 2 = 8 does not divide 4:
+        #   RuntimeError: world_size (4) is not divisible by
+        #                 expert_tensor_model_pipeline_parallel size (8)
+        # PP=2 with EP=2 makes that product 4. Keeping PP=2 matters for host memory, not just
+        # divisibility: each rank then holds half the 48 layers, and the first attempt here
+        # (PP=1, EP=4) needed ~44 GB of host RAM per rank to build and load the model -- 176 GB
+        # across four ranks on a 251 GB box, which Ray's OOM killer cut down. The per-rank
+        # expert count is unchanged by the trade: (128/EP) x (48/PP) is 64 x 24 either way,
+        # the same 1536 expert-layers the 8-GPU MI355X profile gives each of its ranks.
+        # TP stays 1, so no --sequence-parallel (it needs TP > 1). DP is 2.
+        # Enablement only: nothing here has been tuned for 432 GB cards.
+        case ("MI455X", 1):
+            perf_args += (
+                "--tensor-model-parallel-size 1 "
+                "--pipeline-model-parallel-size 2 "
+                "--context-parallel-size 1 "
+                "--expert-model-parallel-size 2 "
+                "--expert-tensor-parallel-size 1 "
+                "--max-tokens-per-gpu 16384 "
+            )
+            sglang_args = (
+                "--rollout-num-gpus-per-engine 2 "
+                "--sglang-mem-fraction-static 0.7 "
+                "--sglang-max-running-requests 512 "
+            )
+            # No --optimizer-cpu-offload here, unlike MI355X. That trade only makes sense when
+            # HBM is the scarce side: a 288 GB MI355X node has 8 cards against the same host
+            # RAM, while gfx1250 has 432 GB per card and this node has 4 of them. Offloading
+            # put ~45 GB of optimizer state per rank into host memory -- ~170 GB across four
+            # ranks on a 251 GB machine -- and Ray's OOM killer took out two of the actors.
+            optimizer_args += "--use-precision-aware-optimizer "
         case ("MI350X" | "MI355X", 1 | 2):
             perf_args += (
                 "--tensor-model-parallel-size 1 "

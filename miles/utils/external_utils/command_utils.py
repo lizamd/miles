@@ -392,6 +392,8 @@ NUM_GPUS_OF_HARDWARE = {
     "GB300": 4,
     "MI350X": 8,
     "MI355X": 8,
+    # MI455X OAM count varies by chassis; 4 is what the gfx1250 nodes in use here carry.
+    "MI455X": 4,
 }
 
 GENERATION_HARDWARE = {
@@ -412,6 +414,12 @@ def detect_hardware() -> str:
     name = torch.cuda.get_device_name()
     if torch.version.hip is not None:
         detected = next((hardware for hardware in ("MI350X", "MI355X") if hardware in name), None)
+        if detected is None:
+            # MI455X reports the generic marketing name "AMD Radeon Graphics", so the model
+            # cannot be read off it; the gfx arch is what actually identifies the part.
+            arch = torch.cuda.get_device_properties(0).gcnArchName  # e.g. "gfx1250:sramecc+:xnack-"
+            if arch.startswith("gfx1250"):
+                detected = "MI455X"
     else:
         grace = platform.machine() == "aarch64"
         match torch.cuda.get_device_capability():

@@ -86,6 +86,38 @@ VARIANTS = {
             "TE_USE_WHEEL": "1",
         },
     },
+    # MI455X. Differs from the gfx950 variants in more than the arch string: the base is
+    # python3.12 with a pip-installed ROCm 10 SDK, no gfx1250 wheel exists for Transformer
+    # Engine or flash-attn, and the SDK's librccl carries no gfx1250 device code.
+    "rocm10-mi45x": {
+        "image": "rocm/sgl-dev",
+        "tag_postfix": "-rocm10-mi45x",
+        "tag_prefix": "miles",
+        "dockerfile": "docker/Dockerfile.rocm",
+        "build_args": {
+            "GPU_ARCH": "gfx1250",
+            "SGLANG_IMAGE_REPO": "rocm/sgl-dev",
+            "SGLANG_IMAGE_TAG": "v0.5.18-rocm10-mi45x-20260904",
+            # ROCm 10 wheels for python3.12; only sgl-router and the gateway are taken from
+            # here, both arch-independent. TE and flash-attn in that release are gfx950.
+            "WHEELS_TAG_ROCM": "rocm10-gfx950-v0.5.18",
+            # No gfx1250 TE wheel: build it, pinned to the revision the Primus gfx1250 image
+            # ships, which is the only one measured on this part.
+            "TE_USE_WHEEL": "0",
+            "TRANSFORMER_ENGINE_COMMIT": "ebbd623b2403e2706bc7eff20b5487e34683f1f6",
+            "INSTALL_FLASH_ATTN": "0",
+            # gfx1250 apex, prebuilt into docker/prebuilt (see the Dockerfile for why).
+            "INSTALL_APEX": "1",
+            # The SDK librccl has a NOBITS .hip_fatbin; take the 94 MB gfx1250 build instead.
+            "USE_DONOR_RCCL": "1",
+            # ROCm 10, so neither ROCm 7.x workaround applies.
+            "APPLY_ROCR_VMMFIX": "0",
+            "SGLANG_USE_ROCM700A": "0",
+            "HSA_ENABLE_IPC_MODE_LEGACY": "0",
+            # torch 2.11+rocm10 and sglang 0.5.18 here are built against numpy 2.x.
+            "NUMPY_SPEC": "",
+        },
+    },
 }
 
 
@@ -179,6 +211,7 @@ class Variant(str, Enum):
     rocm700_mi35x = "rocm700-mi35x"
     rocm700_mi30x = "rocm700-mi30x"
     rocm720_mi35x = "rocm720-mi35x"
+    rocm10_mi45x = "rocm10-mi45x"
 
 
 class ImageTag(str, Enum):
