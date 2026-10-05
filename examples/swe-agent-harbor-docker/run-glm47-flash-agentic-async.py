@@ -60,6 +60,10 @@ class ScriptArgs(command_utils.ExecuteTrainConfig):
     save_traces_dir: str = ""
     prompt_data: str = "/root/swe_train.jsonl"
     max_seq_len: int = 16384
+    # Engine-side hard cap on prompt + generation per request. Without it sglang serves up to the
+    # model's own context window, and max_seq_len only trims samples after the trial ends, so a
+    # runaway trajectory can hold a 100k+ token KV footprint and starve every other request.
+    sglang_context_length: int = 65536
     rollout_max_response_len: int = 8192
     save_interval: int = 5
 
@@ -261,6 +265,7 @@ def execute(args: ScriptArgs):
     sglang_args = (
         f"--rollout-num-gpus-per-engine {sglang_world_size} "
         "--sglang-mem-fraction-static 0.80 "
+        f"--sglang-context-length {args.sglang_context_length} "
         f"--sglang-tp-size {sglang_world_size} "
         f"--sglang-ep-size {sglang_world_size} "
         "--sglang-enable-dp-attention "

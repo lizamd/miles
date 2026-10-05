@@ -41,6 +41,10 @@ class ScriptArgs(command_utils.ExecuteTrainConfig):
 
     # Training settings
     max_seq_len: int = 65536
+    # Engine-side hard cap on prompt + generation per request. Without it sglang serves up to the
+    # model's own context window, and max_seq_len only trims samples after the trial ends, so a
+    # runaway trajectory can hold a 100k+ token KV footprint and starve every other request.
+    sglang_context_length: int = 65536
     num_rollout: int = 3000
     rollout_batch_size: int = 4
     n_samples_per_prompt: int = 8
@@ -163,6 +167,7 @@ def execute(args: ScriptArgs):
     sglang_args = (
         "--rollout-num-gpus-per-engine 1 "
         "--sglang-mem-fraction-static 0.7 "
+        f"--sglang-context-length {args.sglang_context_length} "
         "--sglang-tool-call-parser glm47 "
         "--sglang-reasoning-parser glm45 "
         "--sglang-router-port 31000 "
