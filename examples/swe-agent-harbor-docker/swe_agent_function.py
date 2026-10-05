@@ -34,6 +34,18 @@ def _agent_trial_timeout_s() -> int:
     return int(os.environ.get("AGENT_TRIAL_TIMEOUT", _DEFAULT_AGENT_TRIAL_TIMEOUT_S))
 
 
+def _agent_server_limits() -> httpx.Limits:
+    """Connection pool limits for the agent-server client, overridable via AGENT_SERVER_MAX_CONNECTIONS.
+
+    Unset means no cap: a fixed cap below the rollout concurrency silently queues trials.
+    """
+    max_connections = os.environ.get("AGENT_SERVER_MAX_CONNECTIONS")
+    return httpx.Limits(
+        max_connections=int(max_connections) if max_connections else None,
+        max_keepalive_connections=32,
+    )
+
+
 def _get_agent_server_client() -> httpx.AsyncClient:
     """Return a client whose long-running requests survive idle network paths."""
     global _agent_server_client
@@ -44,12 +56,11 @@ def _get_agent_server_client() -> httpx.AsyncClient:
             (socket.IPPROTO_TCP, getattr(socket, "TCP_KEEPINTVL", 5), 30),
             (socket.IPPROTO_TCP, getattr(socket, "TCP_KEEPCNT", 6), 5),
         ]
-        transport = httpx.AsyncHTTPTransport(socket_options=socket_options)
-        _agent_server_client = httpx.AsyncClient(
-            transport=transport,
-            limits=httpx.Limits(max_connections=64, max_keepalive_connections=32),
-            timeout=None,
-        )
+        # httpx ignores AsyncClient(limits=...) when transport= is given, so the pool
+        # limits must live on the transport. Each in-flight trial holds one connection
+        # for its whole run; miles already bounds how many trials are in flight.
+        transport = httpx.AsyncHTTPTransport(socket_options=socket_options, limits=_agent_server_limits())
+        _agent_server_client = httpx.AsyncClient(transport=transport, timeout=None)
     return _agent_server_client
 
 
