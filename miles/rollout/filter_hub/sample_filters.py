@@ -35,6 +35,8 @@ def mask_truncated_zero_reward(args: Namespace, data: list[list[Sample]]) -> Non
     total = masked = 0
     for sample in iter_samples(data):
         total += 1
+        if not args.reward_key and isinstance(sample.reward, dict):
+            continue  # no scalar to compare without --reward-key; leave the sample in the loss
         reward = sample.get_reward_value(args) if sample.reward is not None else None
         if is_cut_off(sample) and (reward is None or reward <= 0):
             sample.remove_sample = True

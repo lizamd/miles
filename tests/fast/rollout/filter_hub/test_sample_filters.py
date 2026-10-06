@@ -40,8 +40,16 @@ def test_cut_off_zero_reward_is_masked(sample: Sample) -> None:
         make_sample(reward=0.0),  # finished and wrong: a real negative
         make_sample(reward=0.0, exit_status="Submitted"),
         make_sample(reward=0.0, exit_status="AgentError"),  # infra failures are a different filter's call
+        make_sample(reward={"score": 0.0}, exit_status="TimeLimitExceeded"),  # dict reward, no --reward-key
     ],
-    ids=["truncated_correct", "time_limit_correct", "completed_wrong", "submitted_wrong", "agent_error"],
+    ids=[
+        "truncated_correct",
+        "time_limit_correct",
+        "completed_wrong",
+        "submitted_wrong",
+        "agent_error",
+        "dict_reward",
+    ],
 )
 def test_other_samples_stay_in_the_loss(sample: Sample) -> None:
     mask_truncated_zero_reward(ARGS, [[sample]])
