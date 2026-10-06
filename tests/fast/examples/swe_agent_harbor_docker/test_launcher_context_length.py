@@ -49,3 +49,17 @@ def test_launcher_caps_engine_context(launcher: str, monkeypatch: pytest.MonkeyP
     train_args = _train_args(module, monkeypatch, sglang_context_length=12345, **overrides)
 
     assert re.findall(r"--sglang-context-length (\d+)", train_args) == ["12345"]
+
+
+@pytest.mark.parametrize("launcher", ["run.py", "run-glm47-flash-agentic-async.py"])
+def test_default_context_leaves_room_for_one_turn_past_max_seq_len(
+    launcher: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The engine cap must sit above max_seq_len, or the max_seq_len limit can never be reached."""
+    module = _load_launcher(launcher)
+    overrides = {k: v.format(tmp=tmp_path) if isinstance(v, str) else v for k, v in LAUNCHERS[launcher].items()}
+
+    train_args = _train_args(module, monkeypatch, max_seq_len=20000, rollout_max_response_len=3000, **overrides)
+
+    assert re.findall(r"--sglang-context-length (\d+)", train_args) == ["23000"]
+    assert re.findall(r"--rollout-max-response-len (\d+)", train_args) == ["3000"]
