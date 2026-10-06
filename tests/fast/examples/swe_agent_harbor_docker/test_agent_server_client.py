@@ -84,3 +84,10 @@ def test_max_connections_override_is_honored(monkeypatch: pytest.MonkeyPatch) ->
     module = _load_agent_function()
 
     assert asyncio.run(_peak_concurrent_trials(module, NUM_TRIALS)) == 40
+
+
+def test_invalid_max_connections_falls_back_to_no_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_SERVER_MAX_CONNECTIONS", "forty")
+    module = _load_agent_function()
+
+    assert asyncio.run(_peak_concurrent_trials(module, NUM_TRIALS)) == NUM_TRIALS

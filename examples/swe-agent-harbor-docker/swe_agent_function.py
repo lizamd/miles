@@ -38,12 +38,16 @@ def _agent_server_limits() -> httpx.Limits:
     """Connection pool limits for the agent-server client, overridable via AGENT_SERVER_MAX_CONNECTIONS.
 
     Unset means no cap: a fixed cap below the rollout concurrency silently queues trials.
+    An invalid value is ignored with a warning rather than failing every trial.
     """
-    max_connections = os.environ.get("AGENT_SERVER_MAX_CONNECTIONS")
-    return httpx.Limits(
-        max_connections=int(max_connections) if max_connections else None,
-        max_keepalive_connections=32,
-    )
+    max_connections = None
+    raw = os.environ.get("AGENT_SERVER_MAX_CONNECTIONS")
+    if raw:
+        try:
+            max_connections = int(raw)
+        except ValueError:
+            logger.warning(f"Ignoring AGENT_SERVER_MAX_CONNECTIONS={raw!r}: not an integer; using no cap")
+    return httpx.Limits(max_connections=max_connections, max_keepalive_connections=32)
 
 
 def _get_agent_server_client() -> httpx.AsyncClient:
