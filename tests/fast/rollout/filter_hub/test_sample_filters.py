@@ -2,10 +2,12 @@ from tests.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=5, suite="stage-a-cpu", labels=[])
 
+import logging
 from argparse import Namespace
 
 import pytest
 
+from miles.rollout.filter_hub import sample_filters
 from miles.rollout.filter_hub.sample_filters import mask_truncated_zero_reward
 from miles.utils.function_registry import load_function
 from miles.utils.types import Sample
@@ -65,6 +67,18 @@ def test_reward_key_is_respected() -> None:
     mask_truncated_zero_reward(args, [[passed, failed]])
 
     assert [passed.remove_sample, failed.remove_sample] == [False, True]
+
+
+def test_dict_reward_without_reward_key_warns_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(sample_filters, "_warned_dict_reward", False)
+
+    with caplog.at_level(logging.WARNING, logger=sample_filters.__name__):
+        for _ in range(2):
+            mask_truncated_zero_reward(ARGS, [[make_sample(reward={"score": 0.0}, exit_status="TimeLimitExceeded")]])
+
+    assert sum("--reward-key is not set" in r.getMessage() for r in caplog.records) == 1
 
 
 def test_loadable_by_rollout_sample_filter_path() -> None:

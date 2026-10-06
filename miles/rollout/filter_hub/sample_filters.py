@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 # rather than finished (Harbor's names for the wall-clock and context limits).
 CUT_OFF_EXIT_STATUSES = frozenset({"TimeLimitExceeded", "SequenceLengthLimitExceeded"})
 
+_warned_dict_reward = False
+
 
 def is_cut_off(sample: Sample) -> bool:
     return (
@@ -32,11 +34,19 @@ def mask_truncated_zero_reward(args: Namespace, data: list[list[Sample]]) -> Non
     (DeepSWE's "compact filtering"). Cut-off trajectories with a positive reward stay: the
     grader may still pass a patch the agent wrote before the limit hit.
     """
+    global _warned_dict_reward
     total = masked = 0
     for sample in iter_samples(data):
         total += 1
         if not args.reward_key and isinstance(sample.reward, dict):
-            continue  # no scalar to compare without --reward-key; leave the sample in the loss
+            # No scalar to compare without --reward-key; leave the sample in the loss.
+            if not _warned_dict_reward:
+                logger.warning(
+                    "mask_truncated_zero_reward: rewards are dicts and --reward-key is not set, "
+                    "so those samples are never masked"
+                )
+                _warned_dict_reward = True
+            continue
         reward = sample.get_reward_value(args) if sample.reward is not None else None
         if is_cut_off(sample) and (reward is None or reward <= 0):
             sample.remove_sample = True
