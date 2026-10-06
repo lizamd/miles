@@ -38,7 +38,7 @@ def _agent_server_limits() -> httpx.Limits:
     """Connection pool limits for the agent-server client, overridable via AGENT_SERVER_MAX_CONNECTIONS.
 
     Unset means no cap: a fixed cap below the rollout concurrency silently queues trials.
-    An invalid value is ignored with a warning rather than failing every trial.
+    An invalid value is ignored with a warning rather than failing or stalling every trial.
     """
     max_connections = None
     raw = os.environ.get("AGENT_SERVER_MAX_CONNECTIONS")
@@ -46,7 +46,11 @@ def _agent_server_limits() -> httpx.Limits:
         try:
             max_connections = int(raw)
         except ValueError:
-            logger.warning(f"Ignoring AGENT_SERVER_MAX_CONNECTIONS={raw!r}: not an integer; using no cap")
+            pass
+        if max_connections is None or max_connections <= 0:
+            # A pool of 0 admits no connection, so every trial would wait out its timeout.
+            logger.warning(f"Ignoring AGENT_SERVER_MAX_CONNECTIONS={raw!r}: not a positive integer; using no cap")
+            max_connections = None
     return httpx.Limits(max_connections=max_connections, max_keepalive_connections=32)
 
 
